@@ -156,8 +156,8 @@ clear_pem_cache() ->
 %% Description: Lookup the trusted cert with Key = {reference(),
 %% serialnumber(), issuer()}.
 %% --------------------------------------------------------------------
-lookup_trusted_cert(DbHandle, Ref, SerialNumber, Issuer) ->
-    ssl_pkix_db:lookup_trusted_cert(DbHandle, Ref, SerialNumber, Issuer).
+lookup_trusted_cert(_, Certs, SerialNumber, Issuer) ->
+    ssl_pkix_db:lookup_trusted_cert(Certs, SerialNumber, Issuer).
 
 %%--------------------------------------------------------------------
 -spec new_session_id(integer()) -> session_id().
@@ -284,16 +284,15 @@ init([Name, Opts]) ->
 %%--------------------------------------------------------------------
 handle_call({{connection_init, <<>>, Role, {CRLCb, UserCRLDb}}, _Pid}, _From,
 	    #state{certificate_db = [CertDb, FileRefDb, PemChace | _] = Db} = State) ->
-    Ref = make_ref(), 
-    Result = {ok, Ref, CertDb, FileRefDb, PemChace, 
+    Result = {ok, undefined, CertDb, FileRefDb, PemChace, 
 	      session_cache(Role, State), {CRLCb, crl_db_info(Db, UserCRLDb)}},
     {reply, Result, State#state{certificate_db = Db}};
 
 handle_call({{connection_init, Trustedcerts, Role, {CRLCb, UserCRLDb}}, Pid}, _From,
 	    #state{certificate_db = [CertDb, FileRefDb, PemChace | _] = Db} = State) ->
     case add_trusted_certs(Pid, Trustedcerts, Db) of
-	{ok, Ref} ->
-	    {reply, {ok, Ref, CertDb, FileRefDb, PemChace, session_cache(Role, State), 
+	{ok, Res} ->
+	    {reply, {ok, Res, CertDb, FileRefDb, PemChace, session_cache(Role, State), 
 		     {CRLCb, crl_db_info(Db, UserCRLDb)}}, State};
 	{error, _} = Error ->
 	    {reply, Error, State}

@@ -82,6 +82,10 @@ remove(Dbs) ->
 %% <SerialNumber, Issuer>. Ref is used as it is specified  
 %% for each connection which certificates are trusted.
 %%--------------------------------------------------------------------
+lookup_trusted_cert(Certs, SerialNumber, Issuer) ->
+    [Cert || {SN, Iss, _, Cert} <- Certs,
+             SN =:= SerialNumber andalso Iss =:= Issuer].
+
 lookup_trusted_cert(DbHandle, Ref, SerialNumber, Issuer) ->
     case lookup({Ref, SerialNumber, Issuer}, DbHandle) of
 	undefined ->
@@ -103,25 +107,25 @@ lookup_cached_pem(PemChache, File) ->
 %% runtime database. Returns Ref that should be handed to lookup_trusted_cert
 %% together with the cert serialnumber and issuer.
 %%--------------------------------------------------------------------
-add_trusted_certs(_Pid, {der, DerList}, [CertDb, _,_ | _]) ->
-    NewRef = make_ref(),
-    add_certs_from_der(DerList, NewRef, CertDb),
-    {ok, NewRef};
+add_trusted_certs(_Pid, {der, DerList}, [_CertDb, _,_ | _]) ->
+    Res = add_certs_from_der(DerList, ignore, ignore),
+    {ok, Res};
 
 add_trusted_certs(_Pid, File, [CertsDb, RefDb, PemChache | _] = Db) ->
     case lookup_cached_pem(Db, File) of
-	[{_Content, Ref}] ->
-	    ref_count(Ref, RefDb, 1),
-	    {ok, Ref};
-	[Content] ->
-	    Ref = make_ref(),
-	    update_counter(Ref, 1, RefDb),
-	    insert(File, {Content, Ref}, PemChache),
-	    add_certs_from_pem(Content, Ref, CertsDb),
-	    {ok, Ref};
-	undefined ->
-	    new_trusted_cert_entry(File, Db)
+        [{_Content, Ref}] ->
+            ref_count(Ref, RefDb, 1),
+            {ok, Ref};
+        [Content] ->
+            Ref = make_ref(),
+            update_counter(Ref, 1, RefDb),
+            insert(File, {Content, Ref}, PemChache),
+            add_certs_from_pem(Content, Ref, CertsDb),
+            {ok, Ref};
+        undefined ->
+            new_trusted_cert_entry(File, Db)
     end.
+
 %%--------------------------------------------------------------------
 %%
 %% Description: Cache file as binary in DB
@@ -245,21 +249,20 @@ remove_certs(Ref, CertsDb) ->
 
 add_certs_from_der(DerList, Ref, CertsDb) ->
     Add = fun(Cert) -> add_certs(Cert, Ref, CertsDb) end,
-    [Add(Cert) || Cert <- DerList],
-    ok.
+    [Add(Cert) || Cert <- DerList].
 
 add_certs_from_pem(PemEntries, Ref, CertsDb) ->
     Add = fun(Cert) -> add_certs(Cert, Ref, CertsDb) end,
     [Add(Cert) || {'Certificate', Cert, not_encrypted} <- PemEntries],
     ok.
 
-add_certs(Cert, Ref, CertsDb) ->
+add_certs(Cert, _, _) ->
     try  ErlCert = public_key:pkix_decode_cert(Cert, otp),
 	 TBSCertificate = ErlCert#'OTPCertificate'.tbsCertificate,
 	 SerialNumber = TBSCertificate#'OTPTBSCertificate'.serialNumber,
 	 Issuer = public_key:pkix_normalize_name(
 		    TBSCertificate#'OTPTBSCertificate'.issuer),
-	 insert({Ref, SerialNumber, Issuer}, {Cert,ErlCert}, CertsDb)
+	 {SerialNumber, Issuer, Cert, ErlCert}
     catch
 	error:_ ->
 	    Report = io_lib:format("SSL WARNING: Ignoring a CA cert as "
